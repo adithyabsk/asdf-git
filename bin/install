@@ -10,7 +10,35 @@ check_dependencies "$(dirname "$0")/../lib/command_dependencies.txt" "failure"
 
 unzip -qq "${ASDF_DOWNLOAD_PATH}/archive.zip" -d "${ASDF_DOWNLOAD_PATH}/"
 cd "${ASDF_DOWNLOAD_PATH}/git-${ASDF_INSTALL_VERSION}"
+
+# Ensure git is built with HTTPS support (git-remote-https).
+# If curl dev headers/libs aren't available, create a shim directory with
+# headers downloaded from curl.se and a symlink to the system libcurl.so.
+curl_make_args=()
+curl_configure_args=()
+if echo '#include <curl/curl.h>' | cc -E -x c - >/dev/null 2>&1; then
+  log_info "System curl development headers found."
+elif command -v curl-config >/dev/null 2>&1; then
+  log_info "curl-config found, using system libcurl."
+else
+  SYSTEM_CURL_SO="$(ldconfig -p 2>/dev/null | grep 'libcurl\.so\.' | head -1 | awk '{print $NF}')"
+  if [ -z "${SYSTEM_CURL_SO}" ]; then
+    log_failure_and_exit "No system libcurl found. Install libcurl4-openssl-dev or set CURLDIR."
+  fi
+  SYSTEM_CURL_VERSION="$(curl --version 2>/dev/null | head -1 | awk '{print $2}')"
+  log_warning "curl-dev headers missing. Downloading curl ${SYSTEM_CURL_VERSION} headers..."
+  CURL_SHIM="${ASDF_DOWNLOAD_PATH}/curl-shim"
+  mkdir -p "${CURL_SHIM}/include" "${CURL_SHIM}/lib"
+  curl -sL "https://curl.se/download/curl-${SYSTEM_CURL_VERSION}.tar.gz" \
+    | tar -xz -C "${CURL_SHIM}/" --strip-components=2 "curl-${SYSTEM_CURL_VERSION}/include/curl"
+  mv "${CURL_SHIM}/curl" "${CURL_SHIM}/include/curl"
+  ln -sf "${SYSTEM_CURL_SO}" "${CURL_SHIM}/lib/libcurl.so"
+  curl_make_args=("CURLDIR=${CURL_SHIM}" "CURL_LDFLAGS=-lcurl")
+  curl_configure_args=("--with-curl=${CURL_SHIM}")
+  log_success "Curl shim created with headers + system libcurl."
+fi
+
 make configure
-./configure --prefix="${ASDF_INSTALL_PATH}"
-make
-make install
+./configure --prefix="${ASDF_INSTALL_PATH}" "${curl_configure_args[@]}"
+make -j"$(nproc)" "${curl_make_args[@]}"
+make install "${curl_make_args[@]}"
