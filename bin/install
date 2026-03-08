@@ -33,7 +33,8 @@ else
     | tar -xz -C "${CURL_SHIM}/" --strip-components=2 "curl-${SYSTEM_CURL_VERSION}/include/curl"
   mv "${CURL_SHIM}/curl" "${CURL_SHIM}/include/curl"
   ln -sf "${SYSTEM_CURL_SO}" "${CURL_SHIM}/lib/libcurl.so"
-  curl_make_args=("CURLDIR=${CURL_SHIM}" "CURL_LDFLAGS=-lcurl")
+  SYSTEM_CURL_DIR="$(dirname "${SYSTEM_CURL_SO}")"
+  curl_make_args=("CURLDIR=${CURL_SHIM}" "CURL_LDFLAGS=-L${CURL_SHIM}/lib -lcurl -Wl,-rpath,${SYSTEM_CURL_DIR} -Wl,--disable-new-dtags")
   curl_configure_args=("--with-curl=${CURL_SHIM}")
   log_success "Curl shim created with headers + system libcurl."
 fi
