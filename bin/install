@@ -39,7 +39,13 @@ else
   log_success "Curl shim created with headers + system libcurl."
 fi
 
+gettext_make_args=()
+if ! command -v msgfmt >/dev/null 2>&1 || ! msgfmt --version >/dev/null 2>&1; then
+  log_warning "msgfmt not usable. Building git without locale support (NO_GETTEXT)."
+  gettext_make_args=("NO_GETTEXT=YesPlease")
+fi
+
 make configure
 ./configure --prefix="${ASDF_INSTALL_PATH}" "${curl_configure_args[@]}"
-make -j"$(nproc)" "${curl_make_args[@]}"
-make install "${curl_make_args[@]}"
+make -j"$(nproc)" "${curl_make_args[@]}" "${gettext_make_args[@]}"
+make install "${curl_make_args[@]}" "${gettext_make_args[@]}"

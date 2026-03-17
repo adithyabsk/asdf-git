@@ -2,7 +2,6 @@ autoconf
 bash
 curl
 gcc
-gettext
 make
 openssl
 unzip
