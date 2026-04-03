@@ -6,20 +6,31 @@ plugin_dir="$(dirname "$(dirname "$current_script_path")")"
 
 source "${plugin_dir}/lib/utils.bash"
 
+# Sanitize build environment: strip conda paths from PATH and LD_LIBRARY_PATH.
+# Conda's shared libs (libunistring, libcurl) override system versions and cause
+# symbol lookup errors in system tools (msgfmt) and ABI mismatches at link time.
+_strip_conda_paths() {
+  echo "$1" | tr ':' '\n' | grep -v conda | paste -sd: -
+}
+export PATH="$(_strip_conda_paths "$PATH")"
+if [ -n "${LD_LIBRARY_PATH:-}" ]; then
+  export LD_LIBRARY_PATH="$(_strip_conda_paths "$LD_LIBRARY_PATH")"
+fi
+
 check_dependencies "$(dirname "$0")/../lib/command_dependencies.txt" "failure"
 
 unzip -qq "${ASDF_DOWNLOAD_PATH}/archive.zip" -d "${ASDF_DOWNLOAD_PATH}/"
 cd "${ASDF_DOWNLOAD_PATH}/git-${ASDF_INSTALL_VERSION}"
 
 # Ensure git is built with HTTPS support (git-remote-https).
-# If curl dev headers/libs aren't available, create a shim directory with
-# headers downloaded from curl.se and a symlink to the system libcurl.so.
+# Without curl-dev headers installed, we create a shim directory with headers
+# downloaded from curl.se and a symlink to the system libcurl.so. RPATH is
+# embedded so the binary always finds the correct libcurl regardless of
+# LD_LIBRARY_PATH at runtime.
 curl_make_args=()
 curl_configure_args=()
 if echo '#include <curl/curl.h>' | cc -E -x c - >/dev/null 2>&1; then
   log_info "System curl development headers found."
-elif command -v curl-config >/dev/null 2>&1; then
-  log_info "curl-config found, using system libcurl."
 else
   SYSTEM_CURL_SO="$(ldconfig -p 2>/dev/null | grep 'libcurl\.so\.' | head -1 | awk '{print $NF}')"
   if [ -z "${SYSTEM_CURL_SO}" ]; then
@@ -39,11 +50,9 @@ else
   log_success "Curl shim created with headers + system libcurl."
 fi
 
-gettext_make_args=()
-if ! command -v msgfmt >/dev/null 2>&1 || ! msgfmt --version >/dev/null 2>&1; then
-  log_warning "msgfmt not usable. Building git without locale support (NO_GETTEXT)."
-  gettext_make_args=("NO_GETTEXT=YesPlease")
-fi
+# Always skip gettext — locale support is unnecessary for mise-managed git
+# and msgfmt is frequently broken by conda LD_LIBRARY_PATH conflicts.
+gettext_make_args=("NO_GETTEXT=YesPlease")
 
 make configure
 ./configure --prefix="${ASDF_INSTALL_PATH}" "${curl_configure_args[@]}"
